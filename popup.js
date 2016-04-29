@@ -108,24 +108,7 @@ function capturePage(data, sender, callback) {
     }
 
 
-    if (!screenshot.canvas) {
-        canvas = document.createElement('canvas');
-        canvas.width = data.totalWidth;
-        canvas.height = data.totalHeight;
-        screenshot.canvas = canvas;
-        screenshot.ctx = canvas.getContext('2d');
 
-        // sendLogMessage('TOTALDIMENSIONS: ' + data.totalWidth + ', ' + data.totalHeight);
-
-        // // Scale to account for device pixel ratios greater than one. (On a
-        // // MacBook Pro with Retina display, window.devicePixelRatio = 2.)
-        // if (scale !== 1) {
-        //     // TODO - create option to not scale? It's not clear if it's
-        //     // better to scale down the image or to just draw it twice
-        //     // as large.
-        //     screenshot.ctx.scale(scale, scale);
-        // }
-    }
 
     // sendLogMessage(data);
 
@@ -134,8 +117,51 @@ function capturePage(data, sender, callback) {
             if (dataURI) {
                 var image = new Image();
                 image.onload = function() {
+                    var sw = image.width / data.w, sh = image.height / data.h;
+                    
+                    if (!screenshot.canvas) {
+                        screenshot.canvas = document.createElement('canvas');
+                        
+                        var maxHeight = 20000, totalHeight = data.totalHeight * sh, newScaleH = maxHeight / totalHeight, newHeight = totalHeight;
+                        var maxWidth = 20000, totalWidth = data.totalWidth * sw, newScaleW = maxWidth / totalWidth, newWidth = totalWidth;
+                        if(newScaleH > 1) newScaleH = 1;
+                        if(newScaleW > 1) newScaleW = 1;
+                        var newScale = newScaleH * newScaleW;
+                        if(totalHeight > maxHeight) {
+                                newHeight = maxHeight;
+                                newWidth = newWidth * newScaleH;
+			            }
+                        if(totalWidth > maxWidth) {
+                        	newWidth = maxWidth;
+                                newHeight = newHeight * newScaleW;
+                        }
+                        screenshot.canvas.height = newHeight;
+                        screenshot.canvas.width = newWidth;
+
+                        screenshot.ctx = screenshot.canvas.getContext('2d');
+                        screenshot.ctx.scale(newScale, newScale);
+
+                        var dataURI = screenshot.canvas.toDataURL();
+                        var byteString = atob(dataURI.split(',')[1]);
+                        if(!byteString.length) {
+                            alert('ERROR');
+                            return false;
+                        }
+
+                        // sendLogMessage('TOTALDIMENSIONS: ' + data.totalWidth + ', ' + data.totalHeight);
+
+                        // // Scale to account for device pixel ratios greater than one. (On a
+                        // // MacBook Pro with Retina display, window.devicePixelRatio = 2.)
+                        // if (scale !== 1) {
+                        //     // TODO - create option to not scale? It's not clear if it's
+                        //     // better to scale down the image or to just draw it twice
+                        //     // as large.
+                        //     screenshot.ctx.scale(scale, scale);
+                        // }
+                    }
+                    
                     // sendLogMessage('img dims: ' + image.width + ', ' + image.height);
-                    screenshot.ctx.drawImage(image, data.x, data.y);
+                    screenshot.ctx.drawImage(image, data.x * sw, data.y * sh);
                     callback(true);
                 };
                 image.src = dataURI;

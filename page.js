@@ -108,7 +108,9 @@ function getPositions(callback) {
             complete: (numArrangements-arrangements.length)/numArrangements,
             totalWidth: fullWidth,
             totalHeight: fullHeight,
-            devicePixelRatio: window.devicePixelRatio
+            devicePixelRatio: 1,
+            w: windowWidth,
+            h: windowHeight
         };
 
         // Need to wait for things to settle
