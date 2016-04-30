@@ -63,14 +63,20 @@ function testURLMatches(url) {
 // Events
 //
 var screenshot, contentURL = '';
-
+var tabCnt, nowTabCnt;
+var resizeImage = false;
 function sendScrollMessage(tab) {
     contentURL = tab.url;
     screenshot = {};
     chrome.tabs.sendRequest(tab.id, {msg: 'scrollPage'}, function() {
         // We're done taking snapshots of all parts of the window. Display
         // the resulting full screenshot image in a new browser tab.
-        openPage();
+        nowTabCnt = 0;
+        screenshot.canvas.forEach(function (row, rowKey) {
+            row.forEach(function (cell, cellKey) {
+                openPage(cell, rowKey + "-" + cellKey);
+            });
+        });
     });
 }
 
@@ -107,9 +113,6 @@ function capturePage(data, sender, callback) {
         data.totalHeight = data.totalHeight / scale;
     }
 
-
-
-
     // sendLogMessage(data);
 
     chrome.tabs.captureVisibleTab(
@@ -118,36 +121,62 @@ function capturePage(data, sender, callback) {
                 var image = new Image();
                 image.onload = function() {
                     var sw = image.width / data.w, sh = image.height / data.h;
+                    var maxHeight = 20000, maxWidth = 3000;
+                    var totalHeight = data.totalHeight * sh;
+                    var totalWidth = data.totalWidth * sw;
+                    var i, j;
                     
                     if (!screenshot.canvas) {
-                        screenshot.canvas = document.createElement('canvas');
-                        
-                        var maxHeight = 20000, totalHeight = data.totalHeight * sh, newScaleH = maxHeight / totalHeight, newHeight = totalHeight;
-                        var maxWidth = 20000, totalWidth = data.totalWidth * sw, newScaleW = maxWidth / totalWidth, newWidth = totalWidth;
-                        if(newScaleH > 1) newScaleH = 1;
-                        if(newScaleW > 1) newScaleW = 1;
-                        var newScale = newScaleH * newScaleW;
-                        if(totalHeight > maxHeight) {
+                        resizeImage = (totalHeight > maxHeight || totalWidth > maxWidth) && confirm('resizeImage');
+                        screenshot.canvas = [];
+                        screenshot.ctx = [];
+                        if(resizeImage) {
+                            tabCnt = 1;
+                            var newScaleH = maxHeight / totalHeight, newHeight = totalHeight;
+                            var newScaleW = maxWidth / totalWidth, newWidth = totalWidth;
+                            if(newScaleH > 1) newScaleH = 1;
+                            if(newScaleW > 1) newScaleW = 1;
+                            var newScale = newScaleH * newScaleW;
+                            if(totalHeight > maxHeight) {
                                 newHeight = maxHeight;
                                 newWidth = newWidth * newScaleH;
-			            }
-                        if(totalWidth > maxWidth) {
-                        	newWidth = maxWidth;
+                            }
+                            if(totalWidth > maxWidth) {
+                                newWidth = maxWidth;
                                 newHeight = newHeight * newScaleW;
+                            }
+                            
+                            canvas = document.createElement('canvas');
+                            canvas.height = newHeight;
+                            canvas.width = newWidth;
+                            screenshot.canvas[0] = [];
+                            screenshot.ctx[0] = [];
+                            screenshot.canvas[0][0] = canvas;
+                            screenshot.ctx[0][0] = canvas.getContext('2d');
+                            screenshot.ctx[0][0].scale(newScale, newScale);
+                        }else{
+                            tabCnt = 0;
+                            var len1 = Math.ceil(totalHeight / maxHeight), tmpTotalHeight = totalHeight;
+                            var len2 = Math.ceil(totalWidth / maxWidth), tmpTotalWidth = totalWidth;
+                            if(!len1) len1 = 1;
+                            if(!len2) len2 = 1;
+                            for(i = 0; i < len1; i++) {
+                                screenshot.canvas[i] = [];
+                                screenshot.ctx[i] = [];
+                                tmpTotalWidth = totalWidth;
+                                for(j = 0; j < len2; j++) {
+                                    canvas = document.createElement('canvas');
+                                    screenshot.canvas[i][j] = canvas;
+                                    canvas.height = tmpTotalHeight > maxHeight ? maxHeight : tmpTotalHeight;
+                                    canvas.width = tmpTotalWidth > maxWidth ? maxWidth : tmpTotalWidth;
+                                    screenshot.ctx[i][j] = canvas.getContext('2d');
+                                    tmpTotalWidth -= maxWidth;
+                                    tabCnt++;
+                                }
+                                tmpTotalHeight -= maxHeight;
+                            }
                         }
-                        screenshot.canvas.height = newHeight;
-                        screenshot.canvas.width = newWidth;
-
-                        screenshot.ctx = screenshot.canvas.getContext('2d');
-                        screenshot.ctx.scale(newScale, newScale);
-
-                        var dataURI = screenshot.canvas.toDataURL();
-                        var byteString = atob(dataURI.split(',')[1]);
-                        if(!byteString.length) {
-                            alert('ERROR');
-                            return false;
-                        }
-
+                        
                         // sendLogMessage('TOTALDIMENSIONS: ' + data.totalWidth + ', ' + data.totalHeight);
 
                         // // Scale to account for device pixel ratios greater than one. (On a
@@ -161,7 +190,17 @@ function capturePage(data, sender, callback) {
                     }
                     
                     // sendLogMessage('img dims: ' + image.width + ', ' + image.height);
-                    screenshot.ctx.drawImage(image, data.x * sw, data.y * sh);
+                    
+                    screenshot.ctx.forEach(function (row, rowKey) {
+                        row.forEach(function (cell, cellKey) {
+                            var ofsX = (data.x * sw - cellKey * maxWidth);
+                            var ofsY = (data.y * sh - rowKey * maxHeight);
+                            if(!resizeImage && (ofsX + image.width < 0 || ofsX > maxWidth)) return;
+                            if(!resizeImage && (ofsY + image.height < 0 || ofsY > maxHeight)) return;
+                            cell.drawImage(image, ofsX, ofsY);
+                        });
+                    });
+                    
                     callback(true);
                 };
                 image.src = dataURI;
@@ -169,11 +208,11 @@ function capturePage(data, sender, callback) {
         });
 }
 
-function openPage() {
+function openPage(canvas, cellName) {
     // standard dataURI can be too big, let's blob instead
     // http://code.google.com/p/chromium/issues/detail?id=69227#c27
 
-    var dataURI = screenshot.canvas.toDataURL();
+    var dataURI = canvas.toDataURL();
 
     // convert base64 to raw binary data held in a string
     // doesn't handle URLEncoded DataURIs
@@ -208,11 +247,14 @@ function openPage() {
     } else {
         name = '';
     }
-    name = 'screencapture' + name + '-' + Date.now() + '.png';
+    name = 'screencapture' + name + '-' + Date.now() + "_" + cellName + '.png';
 
     function onwriteend() {
         // open the file that now contains the blob
-        window.open('filesystem:chrome-extension://' + chrome.i18n.getMessage('@@extension_id') + '/temporary/' + name);
+        chrome.tabs.create({
+            url: 'filesystem:chrome-extension://' + chrome.i18n.getMessage('@@extension_id') + '/temporary/' + name
+            , active: ++nowTabCnt == tabCnt
+        });
     }
 
     function errorHandler() {

@@ -88,6 +88,8 @@ function getPositions(callback) {
     }
 
     (function processArrangements() {
+        document.documentElement.style.overflow = 'hidden';
+        
         if (!arrangements.length) {
             cleanUp();
             if (callback) {
